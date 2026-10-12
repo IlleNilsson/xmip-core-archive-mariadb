@@ -2,12 +2,12 @@
 [workspace]
 
 [package]
-name = "xmip-core-archive-mysql"
+name = "xmip-core-archive-mariadb"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/IlleNilsson/xmip-core-archive-mysql"
-description = "MySQL and MariaDB archive target: one item is one row of an archive table. A xmip-core-archive technology."
+repository = "https://github.com/IlleNilsson/xmip-core-archive-mariadb"
+description = "MariaDB archive target: one item is one row of an archive table. A xmip-core-archive technology."
 publish = false
 
 [lib]
@@ -20,10 +20,13 @@ archive = { package = "xmip-core-archive", git = "https://github.com/IlleNilsson
 # The connection: the sibling transport technology's Client speaks the
 # text protocol with the native password, and its Session is the far end
 # a test binds.
-mysql = { package = "xmip-core-transport-mysql", git = "https://github.com/IlleNilsson/xmip-core-transport-mysql", branch = "main" }
+mariadb = { package = "xmip-core-transport-mariadb", git = "https://github.com/IlleNilsson/xmip-core-transport-mariadb", branch = "main" }
 # The user and password it logs in with: the transport capability's one
 # `Login`.
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+# SQL: the dialect this database speaks, which the capability's SqlArchive
+# writes its row and reads its bytes back in.
+sql = { package = "xmip-core-library-sql", git = "https://github.com/IlleNilsson/xmip-core-library-sql", branch = "main" }
 
 [dev-dependencies]
 # The tests archive the capability's fixture item (ADR-0044); the feature

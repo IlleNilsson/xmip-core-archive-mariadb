@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
-//! `MySQL` and `MariaDB` archive: the [`Dialect`] the archive capability's
+//! `MariaDB` archive: the [`Dialect`] the archive capability's
 //! `SqlArchive` keeps each retained item in an archive table with, as
-//! `SqlArchive::<MySql>`.
+//! `SqlArchive::<MariaDb>`.
 //!
 //! The store, the row, the SELECT and the receipt are the capability's
 //! (`archive::sql`, ADR-0044); only the dialect is this crate's — backtick
@@ -12,7 +12,7 @@
 //! because the text protocol hands a BLOB over raw and the row reader
 //! would take it for text, `archived_at` as a `DATETIME` literal in UTC,
 //! and the new row's id asked for afterwards with [`LAST_INSERT_ID`] on
-//! the connection that inserted. The connection is the `MySQL` transport
+//! the connection that inserted. The connection is the `MariaDB` transport
 //! technology's — the text protocol with the native password. The table is
 //! the operator's to create; this is the shape it is written for:
 //!
@@ -27,43 +27,28 @@
 //! );
 //! ```
 //!
-//! The receipt is `mysql://<server>/<database>/<table>?id=<n>`.
+//! The receipt is `mariadb://<server>/<database>/<table>?id=<n>`.
 
 use std::time::SystemTime;
 
 use archive::ArchiveError;
-use archive::sql::{Dialect, Row, Server, first_cell};
-use mysql::{Client, hex};
+use archive::sql::{Database, Row, Server, first_cell};
+use mariadb::Client;
+use sql::{Dialect, MARIADB};
 use transport::Login;
 
 /// The statement that asks for the id the last insert on this connection
 /// made, since the protocol's answer to the INSERT carries it and the
-/// transport's [`mysql::QueryResult`] does not.
+/// transport's [`mariadb::QueryResult`] does not.
 pub const LAST_INSERT_ID: &str = "SELECT LAST_INSERT_ID()";
 
-/// What `MySQL` does its own way.
-pub struct MySql;
+/// What `MariaDB` does its own way.
+pub struct MariaDb;
 
-impl Dialect for MySql {
-    const SCHEME: &'static str = "mysql";
-    const BYTES_EXPRESSION: &'static str = "CONCAT('0x', HEX(bytes))";
+impl Database for MariaDb {
+    const SCHEME: &'static str = "mariadb";
+    const DIALECT: Dialect = MARIADB;
     type Connection = Client;
-
-    fn quote_identifier(name: &str) -> String {
-        mysql::insert::DIALECT.quote_identifier(name)
-    }
-
-    fn quote_literal(text: &str) -> String {
-        mysql::quote_literal(text)
-    }
-
-    fn bytes_literal(bytes: &[u8]) -> String {
-        hex::hex_literal(bytes)
-    }
-
-    fn column_bytes(text: &str) -> Option<Vec<u8>> {
-        hex::from_hex_literal(text)
-    }
 
     fn archived_at() -> String {
         archive::timestamp::datetime_utc(SystemTime::now())
@@ -96,7 +81,7 @@ mod tests {
     use archive::fixture::{item, secs};
     use archive::sql::{SqlArchive, insert_sql, item_from_row, select_sql};
     use archive::{ArchiveItem, ArchiveReceipt, ArchiveStore, metadata};
-    use mysql::{Answer, Event, Session};
+    use mariadb::{Answer, Event, Session};
     use std::net::TcpListener;
     use std::thread::JoinHandle;
 
@@ -115,7 +100,7 @@ mod tests {
         let row = [
             Some(held.data_type.clone()),
             Some(held.identifier.clone()),
-            Some(hex::hex_literal(&held.bytes)),
+            Some(MARIADB.quote_bytes(&held.bytes)),
             Some(metadata::encode(&held.metadata)),
         ];
         let handle = std::thread::spawn(move || {
@@ -165,7 +150,7 @@ mod tests {
 
     #[test]
     fn the_insert_names_the_five_columns_and_the_select_spells_the_bytes() {
-        let sql = insert_sql::<MySql>("audit.archive", &quoted(), "2026-09-09 12:00:00");
+        let sql = insert_sql::<MariaDb>("audit.archive", &quoted(), "2026-09-09 12:00:00");
         assert!(sql.starts_with(
             "INSERT INTO `audit`.`archive` \
              (data_type, identifier, bytes, metadata, archived_at) VALUES ('json', 'it\\'s #1', \
@@ -173,7 +158,7 @@ mod tests {
         ));
         assert!(sql.ends_with("'2026-09-09 12:00:00')"), "{sql}");
         assert_eq!(
-            select_sql::<MySql>("Archive", 41),
+            select_sql::<MariaDb>("Archive", 41),
             "SELECT data_type, identifier, CONCAT('0x', HEX(bytes)), metadata \
              FROM `Archive` WHERE id = 41"
         );
@@ -188,14 +173,17 @@ mod tests {
             Some("0x7BFF".to_string()),
             Some(metadata::encode(&original.metadata)),
         ];
-        assert_eq!(item_from_row::<MySql>(&hex, "here").expect("row"), original);
+        assert_eq!(
+            item_from_row::<MariaDb>(&hex, "here").expect("row"),
+            original
+        );
         let text = vec![
             Some("json".to_string()),
             Some("it's #1".to_string()),
             Some("plain".to_string()),
             Some(String::new()),
         ];
-        let refused = item_from_row::<MySql>(&text, "here").expect_err("not bytes");
+        let refused = item_from_row::<MariaDb>(&text, "here").expect_err("not bytes");
         assert!(
             refused.message.contains("binary form"),
             "{}",
@@ -207,14 +195,14 @@ mod tests {
     fn an_archived_item_is_one_insert_and_its_receipt_names_the_row() {
         let original = item("json#1");
         let (address, far_end) = far_end("secret", &original, 1);
-        let store = SqlArchive::<MySql>::new(address.clone(), "orders", "xmip")
+        let store = SqlArchive::<MariaDb>::new(address.clone(), "orders", "xmip")
             .with_password("secret")
             .with_table("audit.archive")
             .timing_out_after(secs(2));
         let receipt = store.archive(original.clone()).expect("archive");
         assert_eq!(
             receipt.location,
-            format!("mysql://{address}/orders/audit.archive?id=41")
+            format!("mariadb://{address}/orders/audit.archive?id=41")
         );
         assert_eq!(receipt.checksum, None);
         let events = far_end.join().expect("thread");
@@ -235,7 +223,7 @@ mod tests {
     fn the_row_restores_the_item_over_a_second_connection() {
         let original = item("json#2");
         let (address, far_end) = far_end("", &original, 2);
-        let store = SqlArchive::<MySql>::new(address, "orders", "xmip").timing_out_after(secs(2));
+        let store = SqlArchive::<MariaDb>::new(address, "orders", "xmip").timing_out_after(secs(2));
         let receipt = store.archive(original.clone()).expect("archive");
         let restored = store.restore(&receipt).expect("restore");
         assert_eq!(restored, original, "the row read back is the item");
@@ -254,7 +242,7 @@ mod tests {
     #[test]
     fn a_wrong_password_and_a_wrong_receipt_are_refused() {
         let (address, far_end) = far_end("secret", &item("json#3"), 1);
-        let store = SqlArchive::<MySql>::new(address, "orders", "xmip")
+        let store = SqlArchive::<MariaDb>::new(address, "orders", "xmip")
             .with_password("wrong")
             .timing_out_after(secs(2));
         let refused = store.archive(item("json#3")).expect_err("wrong password");
@@ -262,16 +250,16 @@ mod tests {
         far_end.join().expect("thread");
         for location in [
             "s3://bucket/key",
-            "mysql://host/orders/archive",
-            "mysql://host/orders/archive?id=x",
-            "mysql://host/orders?id=1",
+            "mariadb://host/orders/archive",
+            "mariadb://host/orders/archive?id=x",
+            "mariadb://host/orders?id=1",
         ] {
             let receipt = ArchiveReceipt {
                 location: location.to_string(),
                 checksum: None,
             };
             let failure = store.restore(&receipt).expect_err(location);
-            assert!(failure.message.contains("is not mysql://"), "{failure}");
+            assert!(failure.message.contains("is not mariadb://"), "{failure}");
         }
     }
 }
