@@ -5,7 +5,8 @@ MariaDB archive target: one item is one row of an archive table. A technology of
 The store is the capability's `archive::sql::SqlArchive`; this crate is its
 `archive::sql::Database`, `MariaDb` — the SQL the server speaks (`MariaDB`'s, `sql::MARIADB`,
 from `xmip-core-library-sql`) and the connection through
-[xmip-core-transport-mariadb](https://github.com/IlleNilsson/xmip-core-transport-mariadb).
+[xmip-core-library-mariadb](https://github.com/IlleNilsson/xmip-core-library-mariadb),
+the protocol the MariaDB transport speaks too.
 An archive here is `SqlArchive::<MariaDb>::new(server, database, user)`.
 
 ## Toolchain
