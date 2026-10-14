@@ -12,8 +12,9 @@
 //! because the text protocol hands a BLOB over raw and the row reader
 //! would take it for text, `archived_at` as a `DATETIME` literal in UTC,
 //! and the new row's id asked for afterwards with [`LAST_INSERT_ID`] on
-//! the connection that inserted. The connection is the `MariaDB` transport
-//! technology's — the text protocol with the native password. The table is
+//! the connection that inserted. The connection is
+//! `xmip-core-library-mariadb`'s — the text protocol with the native
+//! password, the one protocol the `MariaDB` transport speaks too. The table is
 //! the operator's to create; this is the shape it is written for:
 //!
 //! ```sql
@@ -33,13 +34,12 @@ use std::time::SystemTime;
 
 use archive::ArchiveError;
 use archive::sql::{Database, Row, Server, first_cell};
-use mariadb::Client;
+use mariadb::{Client, Logon, NativePassword};
 use sql::{Dialect, MARIADB};
-use transport::Login;
 
 /// The statement that asks for the id the last insert on this connection
 /// made, since the protocol's answer to the INSERT carries it and the
-/// transport's [`mariadb::QueryResult`] does not.
+/// library's [`mariadb::QueryResult`] does not.
 pub const LAST_INSERT_ID: &str = "SELECT LAST_INSERT_ID()";
 
 /// What `MariaDB` does its own way.
@@ -55,9 +55,14 @@ impl Database for MariaDb {
     }
 
     fn connect(server: &Server) -> Result<Client, ArchiveError> {
-        let login = Login::new(&*server.user, server.password.clone().unwrap_or_default());
-        Client::connect(&server.address, &server.database, &login, server.timeout)
-            .map_err(ArchiveError::caused_by)
+        let logon = Logon {
+            user: &server.user,
+            password: server.password.as_deref().unwrap_or_default(),
+            database: &server.database,
+            plugins: &[&NativePassword],
+            guard: None,
+        };
+        Client::connect(&server.address, &logon, server.timeout).map_err(ArchiveError::caused_by)
     }
 
     fn select(client: &mut Client, sql: &str) -> Result<Vec<Row>, ArchiveError> {
@@ -81,7 +86,7 @@ mod tests {
     use archive::fixture::{item, secs};
     use archive::sql::{SqlArchive, insert_sql, item_from_row, select_sql};
     use archive::{ArchiveItem, ArchiveReceipt, ArchiveStore, metadata};
-    use mariadb::{Answer, Event, Session};
+    use mariadb::{Answer, Event, Expecting, Session};
     use std::net::TcpListener;
     use std::thread::JoinHandle;
 
@@ -96,7 +101,6 @@ mod tests {
     ) -> (String, JoinHandle<Vec<Event>>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let address = listener.local_addr().expect("address").to_string();
-        let expected = Login::new("xmip", password);
         let row = [
             Some(held.data_type.clone()),
             Some(held.identifier.clone()),
@@ -106,7 +110,10 @@ mod tests {
         let handle = std::thread::spawn(move || {
             let mut events = Vec::new();
             for _ in 0..connections {
-                let Ok(session) = Session::accept(&listener, &expected, Some(secs(2))) else {
+                let (stream, _) = listener.accept().expect("accept");
+                stream.set_read_timeout(Some(secs(2))).expect("timeout");
+                let expected = Expecting::new("xmip", password, &NativePassword);
+                let Ok(session) = Session::accept(stream, &expected) else {
                     continue;
                 };
                 let canned = [
