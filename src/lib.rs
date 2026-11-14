@@ -6,7 +6,8 @@
 //!
 //! The store, the row, the SELECT and the receipt are the capability's
 //! (`archive::sql`, ADR-0044); only the dialect is this crate's — backtick
-//! identifiers, literals with the backslash escapes the server reads, the
+//! identifiers, literals in the mode the session reads (a backslash
+//! escaped, or itself under `NO_BACKSLASH_ESCAPES`; a quote doubled), the
 //! bytes going in as the `X'…'` hexadecimal literal a BLOB stores as the
 //! bytes and coming back spelled out — `CONCAT('0x', HEX(bytes))` —
 //! because the text protocol hands a BLOB over raw and the row reader
@@ -52,6 +53,12 @@ impl Database for MariaDb {
 
     fn archived_at() -> String {
         archive::timestamp::datetime_utc(SystemTime::now())
+    }
+
+    /// The mode the session reads (`mariadb::Client::dialect`): a backslash
+    /// escaped, or itself under `NO_BACKSLASH_ESCAPES`.
+    fn dialect(client: &Client) -> Dialect {
+        *client.dialect()
     }
 
     fn connect(server: &Server) -> Result<Client, ArchiveError> {
@@ -160,7 +167,7 @@ mod tests {
         let sql = insert_sql::<MariaDb>("audit.archive", &quoted(), "2026-09-09 12:00:00");
         assert!(sql.starts_with(
             "INSERT INTO `audit`.`archive` \
-             (data_type, identifier, bytes, metadata, archived_at) VALUES ('json', 'it\\'s #1', \
+             (data_type, identifier, bytes, metadata, archived_at) VALUES ('json', 'it''s #1', \
              X'7bff', "
         ));
         assert!(sql.ends_with("'2026-09-09 12:00:00')"), "{sql}");
