@@ -31,8 +31,6 @@
 //!
 //! The receipt is `mariadb://<server>/<database>/<table>?id=<n>`.
 
-use std::time::SystemTime;
-
 use archive::ArchiveError;
 use archive::sql::{Database, Row, Server, first_cell};
 use mariadb::{Client, Logon, NativePassword};
@@ -51,8 +49,8 @@ impl Database for MariaDb {
     const DIALECT: Dialect = MARIADB;
     type Connection = Client;
 
-    fn archived_at() -> String {
-        archive::timestamp::datetime_utc(SystemTime::now())
+    fn archived_at(unix_seconds: i64) -> String {
+        archive::timestamp::datetime_utc(unix_seconds)
     }
 
     /// The mode the session reads (`mariadb::Client::dialect`): a backslash
