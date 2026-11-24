@@ -156,7 +156,7 @@ mod tests {
             data_type: "json".to_string(),
             identifier: "it's #1".to_string(),
             bytes: vec![0x7b, 0xff],
-            metadata: vec![("source".to_string(), "essentials".to_string())],
+            metadata: vec![("source".to_string(), "system-test".to_string())],
         }
     }
 
@@ -224,7 +224,7 @@ mod tests {
         };
         assert!(sql.starts_with("INSERT INTO `audit`.`archive` (data_type, identifier, "));
         assert!(sql.contains("VALUES ('json', 'json#1', X'7b226b657074223a747275657d', "));
-        assert!(sql.contains("'source\u{1f}essentials', '20"));
+        assert!(sql.contains("'source\u{1f}system-test', '20"));
         let stamp = &sql[sql.len() - 22..];
         assert!(stamp.starts_with("'20") && stamp.ends_with("')"), "{sql}");
         assert_eq!(&stamp[11..12], " ", "a DATETIME literal, not RFC 3339");
